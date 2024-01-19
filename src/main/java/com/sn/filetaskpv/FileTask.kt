@@ -1,12 +1,12 @@
 package com.sn.filetaskpv
 
 import com.sn.filetaskpv.extension.copyToWithProgress
-import com.sn.filetaskpv.extension.getMimeType
 import com.sn.filetaskpv.extension.getTotalSize
 import com.sn.filetaskpv.extension.getUniqueFileNameWithCounter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
@@ -18,18 +18,24 @@ import java.util.EnumSet
 
 class FileTask {
 
+    private val moveList: MutableList<String> = mutableListOf()
     private var totalSize: Long = 0
     private var strategy: Pair<FileConflictStrategy, Boolean> =
         Pair(FileConflictStrategy.OVERWRITE, false)
 
 
-    fun deleteFilesAndDirectories(sourcePaths: List<Path>): Boolean {
-        val successList = mutableListOf<Boolean>()
+    fun deleteFilesAndDirectories(sourcePaths: List<Path>): List<String> {
+        val deletedPaths = mutableListOf<String>()
         sourcePaths.forEach { path ->
-            val success = path.toFile().deleteRecursively()
-            successList.add(success)
+            val file = path.toFile()
+            if (file.exists()) {
+                val success = file.deleteRecursively()
+                if (success) {
+                    deletedPaths.add(file.absolutePath)
+                }
+            }
         }
-        return successList.all { it }
+        return deletedPaths
     }
 
     suspend fun moveFilesAndDirectories(
@@ -37,14 +43,17 @@ class FileTask {
         destinationPath: Path,
         callback: FileOperationCallback,
         isCopy: Boolean
-    ): Result<MutableList<Pair<String, String>>> {
+    ): Result<List<String>> {
         totalSize = sourcePaths.getTotalSize()
-        val moveList: MutableList<Pair<String, String>> = mutableListOf()
         try {
             for (sourcePath in sourcePaths) {
                 var targetPath = destinationPath.resolve(sourcePath.fileName)
 
                 if (Files.isDirectory(sourcePath)) {
+
+                    val sourceFile = sourcePath.toFile()
+                    addFilesToMoveList(sourceFile)
+
                     if (Files.exists(targetPath)) {
                         if (!strategy.second) {
                             strategy = callback.fileConflict(sourcePath.toFile())
@@ -66,7 +75,9 @@ class FileTask {
                 } else {
                     moveFileWithConflictResolution(sourcePath, targetPath, callback, isCopy)
                 }
-                moveList.add(Pair(targetPath.toFile().absolutePath, sourcePath.toFile().absolutePath.getMimeType() ?: ""))
+
+                val targetFile = targetPath.toFile()
+                addFilesToMoveList(targetFile)
             }
         } catch (e: Exception) {
             return Result.failure(e)
@@ -150,6 +161,14 @@ class FileTask {
         }
         if (!isCopy) {
             Files.delete(source)
+        }
+    }
+
+    private fun addFilesToMoveList(file: File) {
+        if (file.isDirectory) {
+            moveList.addAll(file.listFiles()?.map { it.absolutePath } ?: emptyList())
+        } else {
+            moveList.add(file.absolutePath)
         }
     }
 }
