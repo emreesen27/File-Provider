@@ -1,7 +1,5 @@
 package com.sn.filetaskpv
 
-import com.sn.filetaskpv.extension.copyToWithProgress
-import com.sn.filetaskpv.extension.getTotalSize
 import com.sn.filetaskpv.extension.getUniqueFileNameWithCounter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -18,11 +16,11 @@ import java.util.EnumSet
 
 class FileTask {
 
+    private var totalItemCount: Long = 0
+    private var movedItemCount: Int = 0
     private val moveList: MutableList<String> = mutableListOf()
-    private var totalSize: Long = 0
     private var strategy: Pair<FileConflictStrategy, Boolean> =
         Pair(FileConflictStrategy.OVERWRITE, false)
-
 
     fun deleteFilesAndDirectories(sourcePaths: List<Path>): List<String> {
         val deletedPaths = mutableListOf<String>()
@@ -44,7 +42,7 @@ class FileTask {
         callback: FileOperationCallback,
         isCopy: Boolean
     ): Result<List<String>> {
-        totalSize = sourcePaths.getTotalSize()
+        totalItemCount = getItemCount(sourcePaths)
         try {
             for (sourcePath in sourcePaths) {
                 var targetPath = destinationPath.resolve(sourcePath.fileName)
@@ -154,14 +152,15 @@ class FileTask {
     ) {
         Files.newInputStream(source).use { input ->
             Files.newOutputStream(target).use { output ->
-                input.copyToWithProgress(output, totalSize) { progress ->
-                    callback.onProgress(progress)
-                }
+                input.copyTo(output)
             }
         }
         if (!isCopy) {
             Files.delete(source)
         }
+        movedItemCount++
+        val progress = ((movedItemCount.toDouble() / totalItemCount.toDouble()) * 100).toInt()
+        callback.onProgress(progress)
     }
 
     private fun addFilesToMoveList(file: File) {
@@ -171,4 +170,9 @@ class FileTask {
             moveList.add(file.absolutePath)
         }
     }
+
+    private fun getItemCount(items: List<Path>): Long {
+        return items.sumOf { if (Files.isDirectory(it)) Files.walk(it).count() else 1 }
+    }
+
 }
